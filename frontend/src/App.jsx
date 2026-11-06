@@ -112,6 +112,8 @@ export default function App() {
   const [selectedIssue, setSelectedIssue] = useState(null)
   const [comment, setComment] = useState('')
   const [notice, setNotice] = useState('')
+  const [view, setView] = useState('board')
+  const [audit, setAudit] = useState([])
 
   // A click still opens the card; the drag starts only after 5px of movement.
   const sensors = useSensors(
@@ -126,6 +128,10 @@ export default function App() {
   const workspaceIssues = issues.filter(
     issue => Number(issue.workspace) === workspaceId
   )
+  const currentWorkspace = workspaces.find(
+    item => Number(item.id) === workspaceId
+  )
+  const isPro = currentWorkspace?.plan === 'PRO'
 
   async function load() {
     try {
@@ -168,6 +174,26 @@ export default function App() {
       load()
     }
   }, [token, workspace])
+
+  async function loadAudit() {
+    try {
+      const response = await api.get('/audit-events/')
+      setAudit(
+        response.data
+          .filter(event => Number(event.workspace) === workspaceId)
+          .slice(0, 50)
+      )
+    } catch (error) {
+      console.error('Audit load error:', error.response?.data || error)
+      setNotice('Could not load activity log.')
+    }
+  }
+
+  useEffect(() => {
+    if (token && workspace && view === 'activity') {
+      loadAudit()
+    }
+  }, [token, workspace, view])
 
   async function login(event) {
     event.preventDefault()
@@ -481,6 +507,22 @@ export default function App() {
           ))}
         </select>
 
+        {currentWorkspace && (
+          <span
+            style={{
+              width: 'max-content',
+              padding: '4px 10px',
+              borderRadius: '999px',
+              fontSize: '11px',
+              fontWeight: 700,
+              background: isPro ? '#ecfdf5' : '#eef2ff',
+              color: isPro ? '#0f9f6e' : '#3457d5'
+            }}
+          >
+            {isPro ? 'PRO PLAN' : 'FREE PLAN'}
+          </span>
+        )}
+
         <form onSubmit={createWs} className="inline-form">
           <input
             placeholder="New workspace"
@@ -491,7 +533,20 @@ export default function App() {
         </form>
 
         <nav>
-          <a className="active">▦ Board</a>
+          <a
+            className={view === 'board' ? 'active' : ''}
+            style={{ cursor: 'pointer' }}
+            onClick={() => setView('board')}
+          >
+            ▦ Board
+          </a>
+          <a
+            className={view === 'activity' ? 'active' : ''}
+            style={{ cursor: 'pointer' }}
+            onClick={() => setView('activity')}
+          >
+            ☰ Activity
+          </a>
           <a>◷ Sprints</a>
           <a>⚙ Settings</a>
         </nav>
@@ -511,7 +566,7 @@ export default function App() {
         <header>
           <div>
             <p className="muted">PROJECT MANAGEMENT / WORKSPACE</p>
-            <h1>Project board</h1>
+            <h1>{view === 'board' ? 'Project board' : 'Activity log'}</h1>
           </div>
 
           <span className="avatar">
@@ -521,6 +576,7 @@ export default function App() {
 
         {notice && <div className="notice">{notice}</div>}
 
+        {view === 'board' && (
         <section className="toolbar">
           <form onSubmit={createProject}>
             <input
@@ -540,7 +596,9 @@ export default function App() {
             <button type="submit">Add issue</button>
           </form>
         </section>
+        )}
 
+        {view === 'board' && (
         <DndContext
           sensors={sensors}
           collisionDetection={boardCollisionDetection}
@@ -585,6 +643,26 @@ export default function App() {
             })}
           </div>
         </DndContext>
+        )}
+
+        {view === 'activity' && (
+          <section className="column" style={{ minHeight: 'auto' }}>
+            {audit.length === 0 && <p className="muted">No activity yet.</p>}
+            {audit.map(event => (
+              <article key={event.id} className="issue" style={{ cursor: 'default' }}>
+                <strong>{event.action}</strong>
+                <small>
+                  {event.entity_type} #{event.entity_id}
+                  {event.metadata?.from
+                    ? ` · ${event.metadata.from} → ${event.metadata.to}`
+                    : ''}
+                  {' · '}
+                  {new Date(event.created_at).toLocaleString()}
+                </small>
+              </article>
+            ))}
+          </section>
+        )}
 
         {selectedIssue && (
           <section className="detail">
