@@ -3,7 +3,7 @@ from django.test import TestCase
 from django.contrib.auth import get_user_model
 from rest_framework.test import APIClient
 from rest_framework_simplejwt.tokens import RefreshToken
-from .models import Workspace, Membership, WorkflowStatus, Project, Issue
+from .models import Workspace, Membership, WorkflowStatus, Project, Issue, Sprint
 
 User=get_user_model()
 class TenantIsolationTests(TestCase):
@@ -71,3 +71,27 @@ class TenantIsolationTests(TestCase):
         self.assertEqual(self.wa.plan,"PRO")
         self.assertEqual(self.wa.subscription_status,"active")
         self.assertEqual(self.wa.stripe_customer_id,"cus_test")
+
+    def _issue_in_alpha(self):
+        pa=Project.objects.create(workspace=self.wa,name="PA",key="PA")
+        sa=WorkflowStatus.objects.create(workspace=self.wa,name="To Do",order=0)
+        issue=Issue.objects.create(workspace=self.wa,project=pa,title="T",status=sa,reporter=self.a)
+        return pa,issue
+    def test_sprint_create_and_assign_issue(self):
+        pa,issue=self._issue_in_alpha()
+        self.auth(self.a)
+        r=self.client.post("/api/sprints/",{"workspace":self.wa.id,"project":pa.id,"name":"Sprint 1"},format="json")
+        self.assertEqual(r.status_code,201)
+        r2=self.client.patch(f"/api/issues/{issue.id}/",{"sprint":r.data["id"]},format="json")
+        self.assertEqual(r2.status_code,200)
+        issue.refresh_from_db()
+        self.assertEqual(issue.sprint_id,r.data["id"])
+    def test_cannot_assign_issue_to_other_workspace_sprint(self):
+        pa,issue=self._issue_in_alpha()
+        pb=Project.objects.create(workspace=self.wb,name="PB",key="PB")
+        sprint_b=Sprint.objects.create(workspace=self.wb,project=pb,name="Beta sprint")
+        self.auth(self.a)
+        r=self.client.patch(f"/api/issues/{issue.id}/",{"sprint":sprint_b.id},format="json")
+        self.assertEqual(r.status_code,403)
+        issue.refresh_from_db()
+        self.assertIsNone(issue.sprint)

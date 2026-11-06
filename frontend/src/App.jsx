@@ -115,6 +115,10 @@ export default function App() {
   const [view, setView] = useState('board')
   const [audit, setAudit] = useState([])
   const [attachments, setAttachments] = useState([])
+  const [sprints, setSprints] = useState([])
+  const [sprintName, setSprintName] = useState('')
+  const [sprintStart, setSprintStart] = useState('')
+  const [sprintEnd, setSprintEnd] = useState('')
 
   // A click still opens the card; the drag starts only after 5px of movement.
   const sensors = useSensors(
@@ -154,13 +158,15 @@ export default function App() {
 
       setWorkspace(String(currentWorkspaceId))
 
-      const [projectResponse, issueResponse] = await Promise.all([
+      const [projectResponse, issueResponse, sprintResponse] = await Promise.all([
         api.get('/projects/', { params: { workspace: currentWorkspaceId } }),
-        api.get('/issues/', { params: { workspace: currentWorkspaceId } })
+        api.get('/issues/', { params: { workspace: currentWorkspaceId } }),
+        api.get('/sprints/', { params: { workspace: currentWorkspaceId } })
       ])
 
       setProjects(projectResponse.data)
       setIssues(issueResponse.data)
+      setSprints(sprintResponse.data)
     } catch (error) {
       console.error('Load error:', error.response?.data || error)
       setNotice(
@@ -393,6 +399,72 @@ export default function App() {
     }
   }
 
+  async function createSprint(event) {
+    event.preventDefault()
+
+    if (!sprintName.trim()) {
+      setNotice('Please enter a sprint name.')
+      return
+    }
+
+    if (!projects[0]) {
+      setNotice('Create a project first.')
+      return
+    }
+
+    try {
+      await api.post('/sprints/', {
+        workspace: Number(workspace),
+        project: projects[0].id,
+        name: sprintName.trim(),
+        start_date: sprintStart || null,
+        end_date: sprintEnd || null
+      })
+
+      setSprintName('')
+      setSprintStart('')
+      setSprintEnd('')
+      setNotice('Sprint created.')
+      await load()
+    } catch (error) {
+      console.error('Sprint creation error:', error.response?.data || error)
+      setNotice(
+        error.response?.data?.detail ||
+        JSON.stringify(error.response?.data || 'Sprint creation failed.')
+      )
+    }
+  }
+
+  async function toggleSprint(sprint) {
+    try {
+      await api.patch(`/sprints/${sprint.id}/`, {
+        is_active: !sprint.is_active
+      })
+      setNotice(sprint.is_active ? 'Sprint completed.' : 'Sprint started.')
+      await load()
+    } catch (error) {
+      console.error('Sprint update error:', error.response?.data || error)
+      setNotice(error.response?.data?.detail || 'Could not update sprint.')
+    }
+  }
+
+  async function assignSprint(issueId, value) {
+    if (value === '') {
+      return
+    }
+
+    try {
+      await api.patch(`/issues/${issueId}/`, {
+        sprint: value === 'none' ? null : Number(value)
+      })
+      setNotice('Issue updated.')
+      await load()
+    } catch (error) {
+      console.error('Assign sprint error:', error.response?.data || error)
+      setNotice(error.response?.data?.detail || 'Could not update issue.')
+    }
+  }
+
   async function loadAttachments(issueId) {
     try {
       const response = await api.get('/attachments/', {
@@ -592,7 +664,13 @@ export default function App() {
           >
             ☰ Activity
           </a>
-          <a>◷ Sprints</a>
+          <a
+            className={view === 'sprints' ? 'active' : ''}
+            style={{ cursor: 'pointer' }}
+            onClick={() => setView('sprints')}
+          >
+            ◷ Sprints
+          </a>
           <a>⚙ Settings</a>
         </nav>
 
@@ -611,7 +689,13 @@ export default function App() {
         <header>
           <div>
             <p className="muted">PROJECT MANAGEMENT / WORKSPACE</p>
-            <h1>{view === 'board' ? 'Project board' : 'Activity log'}</h1>
+            <h1>
+              {view === 'board'
+                ? 'Project board'
+                : view === 'sprints'
+                  ? 'Sprints'
+                  : 'Activity log'}
+            </h1>
           </div>
 
           <span className="avatar">
@@ -688,6 +772,119 @@ export default function App() {
             })}
           </div>
         </DndContext>
+        )}
+
+        {view === 'sprints' && (
+          <>
+            <section className="toolbar">
+              <form onSubmit={createSprint}>
+                <input
+                  placeholder="Sprint name"
+                  value={sprintName}
+                  onChange={event => setSprintName(event.target.value)}
+                />
+                <input
+                  type="date"
+                  value={sprintStart}
+                  onChange={event => setSprintStart(event.target.value)}
+                />
+                <input
+                  type="date"
+                  value={sprintEnd}
+                  onChange={event => setSprintEnd(event.target.value)}
+                />
+                <button type="submit">Create sprint</button>
+              </form>
+            </section>
+
+            {sprints.map(sprint => {
+              const sprintIssues = workspaceIssues.filter(
+                issue => Number(issue.sprint) === sprint.id
+              )
+
+              return (
+                <section
+                  key={sprint.id}
+                  className="column"
+                  style={{ minHeight: 'auto', marginBottom: '16px' }}
+                >
+                  <div className="column-head">
+                    <b>{sprint.name}</b>
+                    <span className="count" style={{ marginLeft: '8px' }}>
+                      {sprint.is_active ? 'ACTIVE' : 'NOT ACTIVE'} · {sprintIssues.length} issues
+                    </span>
+                    <button
+                      className="secondary"
+                      style={{ marginLeft: 'auto' }}
+                      onClick={() => toggleSprint(sprint)}
+                    >
+                      {sprint.is_active ? 'Complete sprint' : 'Start sprint'}
+                    </button>
+                  </div>
+
+                  <small className="muted">
+                    {sprint.start_date || '—'} → {sprint.end_date || '—'}
+                  </small>
+
+                  {sprintIssues.map(issue => (
+                    <article
+                      key={issue.id}
+                      className="issue"
+                      style={{ cursor: 'default', marginTop: '10px' }}
+                    >
+                      <strong>{issue.title}</strong>
+                      <select
+                        value=""
+                        onChange={event => assignSprint(issue.id, event.target.value)}
+                      >
+                        <option value="">Change sprint…</option>
+                        <option value="none">Remove from sprint</option>
+                        {sprints
+                          .filter(item => item.id !== sprint.id)
+                          .map(item => (
+                            <option key={item.id} value={item.id}>
+                              {item.name}
+                            </option>
+                          ))}
+                      </select>
+                    </article>
+                  ))}
+                </section>
+              )
+            })}
+
+            <section className="column" style={{ minHeight: 'auto' }}>
+              <div className="column-head">
+                <b>Backlog</b>
+                <span className="count">
+                  {workspaceIssues.filter(issue => !issue.sprint).length} issues
+                </span>
+              </div>
+
+              {workspaceIssues
+                .filter(issue => !issue.sprint)
+                .map(issue => (
+                  <article
+                    key={issue.id}
+                    className="issue"
+                    style={{ cursor: 'default' }}
+                  >
+                    <strong>{issue.title}</strong>
+                    <select
+                      value=""
+                      onChange={event => assignSprint(issue.id, event.target.value)}
+                    >
+                      <option value="">Move to sprint…</option>
+                      {sprints.map(item => (
+                        <option key={item.id} value={item.id}>
+                          {item.name}
+                        </option>
+                      ))}
+                    </select>
+                  </article>
+                ))}
+            </section>
+          </>
         )}
 
         {view === 'activity' && (

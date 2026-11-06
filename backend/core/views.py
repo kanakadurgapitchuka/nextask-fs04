@@ -110,6 +110,11 @@ class WorkflowStatusViewSet(TenantViewSet):
     queryset=WorkflowStatus.objects.all(); serializer_class=WorkflowStatusSerializer
 class SprintViewSet(TenantViewSet):
     queryset=Sprint.objects.all(); serializer_class=SprintSerializer
+    def perform_create(self, serializer):
+        ws=self.get_workspace()
+        if ws and serializer.validated_data["project"].workspace_id!=ws.id:
+            raise PermissionDenied("Project does not belong to this workspace.")
+        super().perform_create(serializer)
 class IssueViewSet(TenantViewSet):
     queryset=Issue.objects.select_related("status","project","assignee").all(); serializer_class=IssueSerializer
     def perform_create(self, serializer):
@@ -117,8 +122,19 @@ class IssueViewSet(TenantViewSet):
         if not ws: raise PermissionDenied("Workspace membership required.")
         self.ensure_can_write(ws.id)
         check_plan_limit(ws,"issues")
+        self.validate_refs(serializer,ws.id)
         obj=serializer.save(workspace=ws,reporter=self.request.user)
         AuditEvent.objects.create(workspace=ws,actor=self.request.user,action="issue.created",entity_type="Issue",entity_id=obj.id)
+    def validate_refs(self,serializer,workspace_id):
+        # project, status, sprint and board must belong to the same workspace as the issue
+        data=serializer.validated_data
+        for key in ("project","status","sprint","board"):
+            obj=data.get(key)
+            if obj is not None and obj.workspace_id!=workspace_id:
+                raise PermissionDenied(f"The selected {key} does not belong to this workspace.")
+    def perform_update(self, serializer):
+        self.validate_refs(serializer,serializer.instance.workspace_id)
+        super().perform_update(serializer)
     @action(detail=True,methods=["patch"])
     def move(self,request,pk=None):
         issue=self.get_object()
