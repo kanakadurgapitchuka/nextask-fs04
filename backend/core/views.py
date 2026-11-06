@@ -140,11 +140,15 @@ class CommentViewSet(viewsets.ModelViewSet):
 
 class AttachmentViewSet(viewsets.ModelViewSet):
     serializer_class=AttachmentSerializer
+    filterset_fields=["issue"]
     def get_queryset(self): return Attachment.objects.filter(workspace__memberships__user=self.request.user).distinct()
     def perform_create(self,serializer):
         issue=serializer.validated_data["issue"]
-        if not Membership.objects.filter(workspace=issue.workspace,user=self.request.user).exists(): raise PermissionDenied("Workspace membership required.")
-        serializer.save(workspace=issue.workspace,uploaded_by=self.request.user)
+        m=membership_for(self.request.user,issue.workspace_id)
+        if not m: raise PermissionDenied("Workspace membership required.")
+        if m.role not in WRITE_ROLES: raise PermissionDenied("Your role does not allow this action.")
+        obj=serializer.save(workspace=issue.workspace,uploaded_by=self.request.user)
+        AuditEvent.objects.create(workspace=issue.workspace,actor=self.request.user,action="attachment.created",entity_type="Issue",entity_id=issue.id,metadata={"file":obj.file.name.split("/")[-1]})
 
 class AuditEventViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class=AuditEventSerializer

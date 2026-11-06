@@ -114,6 +114,7 @@ export default function App() {
   const [notice, setNotice] = useState('')
   const [view, setView] = useState('board')
   const [audit, setAudit] = useState([])
+  const [attachments, setAttachments] = useState([])
 
   // A click still opens the card; the drag starts only after 5px of movement.
   const sensors = useSensors(
@@ -390,6 +391,50 @@ export default function App() {
       // Put the card back where the server says it is.
       await load()
     }
+  }
+
+  async function loadAttachments(issueId) {
+    try {
+      const response = await api.get('/attachments/', {
+        params: { issue: issueId }
+      })
+      setAttachments(response.data)
+    } catch (error) {
+      console.error('Attachment load error:', error.response?.data || error)
+      setAttachments([])
+    }
+  }
+
+  useEffect(() => {
+    if (selectedIssue) {
+      loadAttachments(selectedIssue.id)
+    } else {
+      setAttachments([])
+    }
+  }, [selectedIssue])
+
+  async function uploadAttachment(event) {
+    const input = event.target
+    const file = input.files[0]
+
+    if (!file || !selectedIssue) {
+      return
+    }
+
+    const formData = new FormData()
+    formData.append('issue', selectedIssue.id)
+    formData.append('file', file)
+
+    try {
+      await api.post('/attachments/', formData)
+      setNotice('File attached.')
+      await loadAttachments(selectedIssue.id)
+    } catch (error) {
+      console.error('Upload error:', error.response?.data || error)
+      setNotice(error.response?.data?.detail || 'File upload failed.')
+    }
+
+    input.value = ''
   }
 
   async function addComment(event) {
@@ -688,6 +733,35 @@ export default function App() {
 
               <button type="submit">Comment</button>
             </form>
+
+            <h3 style={{ marginTop: '18px', fontSize: '14px' }}>Attachments</h3>
+
+            {attachments.length === 0 && (
+              <p className="muted">No attachments yet.</p>
+            )}
+
+            {attachments.map(item => (
+              <a
+                key={item.id}
+                href={item.file}
+                target="_blank"
+                rel="noreferrer"
+                style={{
+                  display: 'block',
+                  fontSize: '13px',
+                  color: '#3457d5',
+                  margin: '4px 0'
+                }}
+              >
+                {decodeURIComponent(item.file.split('/').pop())}
+              </a>
+            ))}
+
+            <input
+              type="file"
+              onChange={uploadAttachment}
+              style={{ marginTop: '10px', width: '100%' }}
+            />
           </section>
         )}
 
