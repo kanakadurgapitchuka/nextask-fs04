@@ -115,6 +115,7 @@ export default function App() {
   const [view, setView] = useState('board')
   const [audit, setAudit] = useState([])
   const [attachments, setAttachments] = useState([])
+  const [comments, setComments] = useState([])
   const [sprints, setSprints] = useState([])
   const [sprintName, setSprintName] = useState('')
   const [sprintStart, setSprintStart] = useState('')
@@ -480,8 +481,10 @@ export default function App() {
   useEffect(() => {
     if (selectedIssue) {
       loadAttachments(selectedIssue.id)
+      loadComments(selectedIssue.id)
     } else {
       setAttachments([])
+      setComments([])
     }
   }, [selectedIssue])
 
@@ -509,6 +512,20 @@ export default function App() {
     input.value = ''
   }
 
+  async function loadComments(issueId) {
+    try {
+      const response = await api.get('/comments/', {
+        params: { issue: issueId }
+      })
+      setComments(
+        response.data.filter(item => Number(item.issue) === Number(issueId))
+      )
+    } catch (error) {
+      console.error('Comment load error:', error.response?.data || error)
+      setComments([])
+    }
+  }
+
   async function addComment(event) {
     event.preventDefault()
 
@@ -524,6 +541,7 @@ export default function App() {
 
       setComment('')
       setNotice('Comment added.')
+      await loadComments(selectedIssue.id)
     } catch (error) {
       console.error('Comment error:', error.response?.data || error)
       setNotice('Comment failed. Check issue membership.')
@@ -920,6 +938,34 @@ export default function App() {
             <p>
               {selectedIssue.description || 'No description provided.'}
             </p>
+
+            <h3 style={{ marginTop: '14px', fontSize: '14px' }}>
+              Comments ({comments.length})
+            </h3>
+
+            <div style={{ maxHeight: '160px', overflowY: 'auto' }}>
+              {comments.length === 0 && (
+                <p className="muted">No comments yet.</p>
+              )}
+
+              {comments.map(item => (
+                <div
+                  key={item.id}
+                  style={{
+                    background: '#f4f6fb',
+                    borderRadius: '10px',
+                    padding: '8px 10px',
+                    margin: '6px 0',
+                    fontSize: '13px'
+                  }}
+                >
+                  <div>{item.body}</div>
+                  <small className="muted">
+                    User #{item.author} · {new Date(item.created_at).toLocaleString()}
+                  </small>
+                </div>
+              ))}
+            </div>
 
             <form onSubmit={addComment}>
               <input
