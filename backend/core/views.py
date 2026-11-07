@@ -57,6 +57,29 @@ class WorkspaceViewSet(viewsets.ModelViewSet):
         task=build_workspace_report.delay(ws.id)
         AuditEvent.objects.create(workspace=ws,actor=request.user,action="report.requested",entity_type="Workspace",entity_id=ws.id,metadata={"task_id":task.id})
         return Response({"task_id":task.id,"status":"queued"},status=202)
+    @action(detail=True,methods=["get","post"])
+    def members(self,request,pk=None):
+        ws=self.get_object()
+        me=membership_for(request.user,ws.id)
+        if request.method=="GET":
+            rows=Membership.objects.filter(workspace=ws).select_related("user").order_by("id")
+            return Response([{"id":m.id,"username":m.user.username,"role":m.role} for m in rows])
+        if not me or me.role not in (Membership.OWNER,Membership.ADMIN):
+            raise PermissionDenied("Only workspace owner/admin can manage members.")
+        username=(request.data.get("username") or "").strip()
+        role=request.data.get("role") or Membership.MEMBER
+        if role not in (Membership.ADMIN,Membership.MEMBER,Membership.VIEWER):
+            return Response({"detail":"Role must be ADMIN, MEMBER or VIEWER."},status=400)
+        user=User.objects.filter(username=username).first()
+        if not user:
+            return Response({"detail":"No user with that username. Ask them to create an account first."},status=404)
+        m,created=Membership.objects.get_or_create(workspace=ws,user=user,defaults={"role":role})
+        if not created:
+            if m.role==Membership.OWNER:
+                return Response({"detail":"The owner's role cannot be changed."},status=400)
+            m.role=role; m.save()
+        AuditEvent.objects.create(workspace=ws,actor=request.user,action="member.added" if created else "member.role_changed",entity_type="Workspace",entity_id=ws.id,metadata={"username":user.username,"role":role})
+        return Response({"id":m.id,"username":user.username,"role":m.role},status=201 if created else 200)
 
 class TenantViewSet(viewsets.ModelViewSet):
     def get_workspace(self):

@@ -116,6 +116,9 @@ export default function App() {
   const [audit, setAudit] = useState([])
   const [attachments, setAttachments] = useState([])
   const [comments, setComments] = useState([])
+  const [members, setMembers] = useState([])
+  const [memberName, setMemberName] = useState('')
+  const [memberRole, setMemberRole] = useState('VIEWER')
   const [sprints, setSprints] = useState([])
   const [sprintName, setSprintName] = useState('')
   const [sprintStart, setSprintStart] = useState('')
@@ -138,6 +141,7 @@ export default function App() {
     item => Number(item.id) === workspaceId
   )
   const isPro = currentWorkspace?.plan === 'PRO'
+  const canManageMembers = ['OWNER', 'ADMIN'].includes(currentWorkspace?.role)
 
   async function load() {
     try {
@@ -182,6 +186,44 @@ export default function App() {
       load()
     }
   }, [token, workspace])
+
+  async function loadMembers() {
+    try {
+      const response = await api.get(`/workspaces/${workspace}/members/`)
+      setMembers(response.data)
+    } catch (error) {
+      console.error('Members load error:', error.response?.data || error)
+      setMembers([])
+    }
+  }
+
+  useEffect(() => {
+    if (token && workspace && view === 'settings') {
+      loadMembers()
+    }
+  }, [token, workspace, view])
+
+  async function addMember(event) {
+    event.preventDefault()
+
+    if (!memberName.trim()) {
+      setNotice('Please enter a username.')
+      return
+    }
+
+    try {
+      await api.post(`/workspaces/${workspace}/members/`, {
+        username: memberName.trim(),
+        role: memberRole
+      })
+      setMemberName('')
+      setNotice('Member added.')
+      await loadMembers()
+    } catch (error) {
+      console.error('Add member error:', error.response?.data || error)
+      setNotice(error.response?.data?.detail || 'Could not add member.')
+    }
+  }
 
   async function loadAudit() {
     try {
@@ -654,7 +696,7 @@ export default function App() {
               color: isPro ? '#0f9f6e' : '#3457d5'
             }}
           >
-            {isPro ? 'PRO PLAN' : 'FREE PLAN'}
+            {isPro ? 'PRO PLAN' : 'FREE PLAN'} · {currentWorkspace.role}
           </span>
         )}
 
@@ -689,7 +731,13 @@ export default function App() {
           >
             ◷ Sprints
           </a>
-          <a>⚙ Settings</a>
+          <a
+            className={view === 'settings' ? 'active' : ''}
+            style={{ cursor: 'pointer' }}
+            onClick={() => setView('settings')}
+          >
+            ⚙ Settings
+          </a>
         </nav>
 
         <div className="sidebar-bottom">
@@ -712,7 +760,9 @@ export default function App() {
                 ? 'Project board'
                 : view === 'sprints'
                   ? 'Sprints'
-                  : 'Activity log'}
+                  : view === 'settings'
+                    ? 'Settings'
+                    : 'Activity log'}
             </h1>
           </div>
 
@@ -903,6 +953,55 @@ export default function App() {
                 ))}
             </section>
           </>
+        )}
+
+        {view === 'settings' && (
+          <section className="column" style={{ minHeight: 'auto' }}>
+            <div className="column-head">
+              <b>Workspace members</b>
+              <span className="count">{members.length}</span>
+            </div>
+
+            {members.map(item => (
+              <article
+                key={item.id}
+                className="issue"
+                style={{ cursor: 'default' }}
+              >
+                <strong>{item.username}</strong>
+                <small>{item.role}</small>
+              </article>
+            ))}
+
+            {canManageMembers ? (
+              <form
+                onSubmit={addMember}
+                style={{
+                  display: 'flex',
+                  gap: '8px',
+                  marginTop: '14px',
+                  flexWrap: 'wrap'
+                }}
+              >
+                <input
+                  placeholder="Username to add"
+                  value={memberName}
+                  onChange={event => setMemberName(event.target.value)}
+                />
+                <select
+                  value={memberRole}
+                  onChange={event => setMemberRole(event.target.value)}
+                >
+                  <option value="VIEWER">Viewer</option>
+                  <option value="MEMBER">Member</option>
+                  <option value="ADMIN">Admin</option>
+                </select>
+                <button type="submit">Add member</button>
+              </form>
+            ) : (
+              <p className="muted">Only owners and admins can add members.</p>
+            )}
+          </section>
         )}
 
         {view === 'activity' && (

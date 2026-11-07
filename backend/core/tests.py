@@ -95,3 +95,24 @@ class TenantIsolationTests(TestCase):
         self.assertEqual(r.status_code,403)
         issue.refresh_from_db()
         self.assertIsNone(issue.sprint)
+
+    def test_owner_adds_viewer_and_viewer_is_read_only(self):
+        viewer=User.objects.create_user(username="vera",password="StrongPass123!")
+        self.auth(self.a)
+        r=self.client.post(f"/api/workspaces/{self.wa.id}/members/",{"username":"vera","role":"VIEWER"},format="json")
+        self.assertEqual(r.status_code,201)
+        self.assertTrue(Membership.objects.filter(workspace=self.wa,user=viewer,role="VIEWER").exists())
+        self.auth(viewer)
+        r2=self.client.post("/api/projects/",{"workspace":self.wa.id,"name":"X","key":"X"},format="json")
+        self.assertEqual(r2.status_code,403)
+    def test_member_cannot_manage_members(self):
+        member=User.objects.create_user(username="mike",password="StrongPass123!")
+        User.objects.create_user(username="nina",password="StrongPass123!")
+        Membership.objects.create(workspace=self.wa,user=member,role="MEMBER")
+        self.auth(member)
+        r=self.client.post(f"/api/workspaces/{self.wa.id}/members/",{"username":"nina","role":"VIEWER"},format="json")
+        self.assertEqual(r.status_code,403)
+    def test_add_unknown_user_returns_404(self):
+        self.auth(self.a)
+        r=self.client.post(f"/api/workspaces/{self.wa.id}/members/",{"username":"nobody","role":"VIEWER"},format="json")
+        self.assertEqual(r.status_code,404)
